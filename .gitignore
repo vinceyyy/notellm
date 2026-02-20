@@ -11,6 +11,7 @@ __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
+dist/
 
 # Jupyter
 .virtual_documents/
@@ -34,4 +35,3 @@ __pycache__/
 .jupyter.log
 .vizard_state.json
 .vizard_template.ipynb
-uv.lock

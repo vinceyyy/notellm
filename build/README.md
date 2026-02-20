@@ -1,38 +1,41 @@
 # Build Scripts
 
-## build_notellm_magic.sh
+## update_archive.sh
 
-Builds the `notellm_magic/cc_jupyter/` module from the pristine archive.
-
-### What it does
-
-1. Copies `archive/cc_jupyter/` to `notellm_magic/cc_jupyter/`
-2. Applies Patch 1: Permission error fix in `magics.py`
-3. Applies Patch 2: Decorative header removal in `jupyter_integration.py`
-
-### When to run
-
-- After updating `archive/cc_jupyter/` with a new upstream version
-- After modifying patch logic
+Downloads the latest `claude-code-jupyter-staging` from PyPI and updates `archive/cc_jupyter/`.
 
 ### Usage
 
 ```bash
-./build/build_notellm_magic.sh
+# Latest version
+./build/update_archive.sh
+
+# Specific version
+./build/update_archive.sh 0.1.39
 ```
 
-## Patches
+## build_notellm_magic.sh (LEGACY)
 
-### Patch 1: Permission Error Fix
+Originally copied `archive/` → `src/` and applied patches. Since v0.2.0, `src/notellm_magic/cc_jupyter/` has **diverged significantly** from the archive (trio→anyio migration, SDK context manager, `add_dirs`, removed `/root/code` workaround). Running this script would **overwrite those changes**.
 
-**File:** `magics.py`
+**Do not run this script** unless you intend to start fresh from a new archive version.
 
-The original code checks if `/root/code` exists (for Anthropic's internal remote dev setup), but this throws `PermissionError` on regular user systems.
+## Update Workflow
 
-**Fix:** Wrap the check in a try/except block.
+Since `src/` has diverged from `archive/`, upstream updates must be manually ported:
 
-### Patch 2: Decorative Header Removal
+```bash
+./build/update_archive.sh          # Pull latest from PyPI
+git diff archive/                   # Review what changed upstream
+# Manually apply relevant upstream changes to src/notellm_magic/cc_jupyter/
+uv sync                            # Rebuild package
+# Test in Jupyter
+```
+
+## Patches (applied in v0.1.0, now baked into src/)
+
+### Decorative Header Removal
 
 **File:** `jupyter_integration.py`
 
-The original code adds decorative `═══` banner comments to every generated cell. This patch removes them for cleaner output.
+The original code adds decorative `═══` banner comments to every generated cell. This was patched for cleaner output. The patch is now directly in `src/` and no longer needs to be re-applied.

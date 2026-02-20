@@ -38,37 +38,29 @@ DATA penguins.csv FILTER species == "Adelie" || PLOT violin Y body_mass_g COLOR 
 
 ### Prerequisites
 
-1. Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
+Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
 
-2. Install Python dependencies (pip only):
-```bash
-pip install trio claude-agent-sdk
-```
-(tested with trio==0.24.0, claude-agent-sdk==0.1.18)
-
-**Note:** Use pip for these dependencies. The `claude-agent-sdk` package is only available on PyPI, not conda-forge.
-
-### Install `notellm_magic`
+### Install `notellm-magic`
 
 ```bash
 git clone https://github.com/prairie-guy/notellm.git
 cd notellm
-./setup.sh
+pip install .
 ```
 
-`setup.sh` copies `notellm_magic/` to your Python user site-packages directory (determined by `python3 -c "import site; print(site.USER_SITE)"`), typically `~/.local/lib/python3.x/site-packages/`.
+Or for development:
+```bash
+uv sync
+```
 
 ### Uninstall
 
 ```bash
-cd notellm
-./uninstall.sh
+pip uninstall notellm-magic
 ```
-
-`uninstall.sh` removes `notellm_magic/` from the same user site-packages location.
 
 ## Usage
 
@@ -126,9 +118,10 @@ Use memoization for efficiency
 ### Magic Commands
 
 **Basic:**
-- `%cc <instructions>` - Continue conversation (one-line)
-- `%%cc <instructions>` - Continue conversation (multi-line)
+- `%cc <instructions>` - Continue conversation (one-line), inserts new cell below
+- `%%cc <instructions>` - Continue conversation (multi-line), inserts new cell below
 - `%cc_new` (or `%ccn`) - Start fresh conversation
+- `%cc_cur` (or `%ccc`) - Like `%cc`, but replaces the prompt cell in-place
 - `%cc --help` - Show all options
 
 **Context management:**
@@ -159,36 +152,49 @@ Use memoization for efficiency
 ```
 notellm/
 ├── archive/
-│   └── cc_jupyter/           # Pristine copy from PyPI
-├── notellm_magic/
-│   ├── __init__.py           # Thin wrapper + permissions setup
-│   └── cc_jupyter/           # Patched fork
+│   └── cc_jupyter/              # Pristine copy from PyPI
+├── src/
+│   └── notellm_magic/
+│       ├── __init__.py          # Thin wrapper + permissions setup
+│       ├── py.typed             # PEP 561 type marker
+│       └── cc_jupyter/          # Patched fork
 ├── build/
-│   └── build_notellm_magic.sh
+│   ├── update_archive.sh           # Pull latest upstream from PyPI
+│   └── build_notellm_magic.sh      # Legacy: archive → src/ + patches
 ├── docs/
-│   └── demo.ipynb            # Demo notebook
-├── setup.sh
-├── uninstall.sh
+│   └── demo.ipynb               # Demo notebook
+├── pyproject.toml
 ├── LICENSE
 └── README.md
 ```
 
 ## Development
 
-### Rebuilding from archive
-
-If you update `archive/cc_jupyter/` with a new upstream version:
+### Setup
 
 ```bash
-./build/build_notellm_magic.sh
+uv sync
 ```
 
-This copies the archive to `notellm_magic/cc_jupyter/` and applies patches.
+### Linting & type checking
 
-### Patches Applied
+```bash
+uv run ruff check src/
+uv run ruff format src/
+uv run pyright src/
+```
 
-1. **Permission error fix** (`magics.py`) - Wraps `/root/code` check in try/except
-2. **Decorative header removal** (`jupyter_integration.py`) - Removes banner comments from generated cells
+### Updating from upstream
+
+The `archive/` directory holds the pristine upstream copy. Since v0.2.0, `src/` has diverged (trio→anyio, SDK modernization), so upstream changes must be manually ported:
+
+```bash
+./build/update_archive.sh          # Pull latest from PyPI
+git diff archive/                   # Review what changed
+# Manually apply relevant changes to src/notellm_magic/cc_jupyter/
+```
+
+See `build/README.md` for details.
 
 ## Attribution
 

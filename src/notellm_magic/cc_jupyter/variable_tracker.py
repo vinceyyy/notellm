@@ -56,9 +56,7 @@ class VariableTracker:
                 return "The IPython session has no user-defined variables."
             user_ns = self.shell.user_ns
             filtered_vars = {
-                k: v
-                for k, v in user_ns.items()
-                if not k.startswith("_") and k not in ["In", "Out", "exit", "quit"]
+                k: v for k, v in user_ns.items() if not k.startswith("_") and k not in ["In", "Out", "exit", "quit"]
             }
 
             if not filtered_vars and not self._previous_variables:
@@ -86,9 +84,7 @@ class VariableTracker:
                     removed_vars.append(name)
 
             # Update previous state with truncated repr strings
-            self._previous_variables = {}
-            for name, value in filtered_vars.items():
-                self._previous_variables[name] = self.get_truncated_repr(value)
+            self._previous_variables = {name: self.get_truncated_repr(value) for name, value in filtered_vars.items()}
 
             # Build output showing only changes
             var_lines = []

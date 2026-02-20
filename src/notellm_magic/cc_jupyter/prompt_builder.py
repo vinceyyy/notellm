@@ -6,12 +6,8 @@ Handles system prompts and content preparation.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 from .constants import EXECUTE_PYTHON_TOOL_NAME
-
-if TYPE_CHECKING:
-    from IPython.core.interactiveshell import InteractiveShell
 
 
 def get_system_prompt(is_ipython: bool, max_cells: int) -> str:
@@ -26,13 +22,17 @@ def get_system_prompt(is_ipython: bool, max_cells: int) -> str:
     """
     if is_ipython:
         env = "shared IPython session"
-        tool_call_result = f"The {EXECUTE_PYTHON_TOOL_NAME} tool call will populate the next input with the Python code you provide."
+        tool_call_result = (
+            f"The {EXECUTE_PYTHON_TOOL_NAME} tool call will populate the next input with the Python code you provide."
+        )
         preference = f"""You can only call {EXECUTE_PYTHON_TOOL_NAME} once, since the IPython terminal does not allow for multiple pending code blocks.
 
 The user will see the code block and can choose to execute it or not."""
     else:
         env = "Jupyter notebook"
-        tool_call_result = f"Each {EXECUTE_PYTHON_TOOL_NAME} call will create a new cell in the user's Jupyter notebook interface."
+        tool_call_result = (
+            f"Each {EXECUTE_PYTHON_TOOL_NAME} call will create a new cell in the user's Jupyter notebook interface."
+        )
         preference = f"""IMPORTANT: Prefer to call {EXECUTE_PYTHON_TOOL_NAME} only ONCE with a short code snippet.
 As a last resort, you may call it multiple times to split up a large code block. You can make at most {max_cells} calls per turn (i.e., in response to each user prompt).
 The user will be presented with the code blocks one by one.
@@ -99,133 +99,36 @@ For example, instead of print(df.head()), use df.head() as the last line.
 
 If <request> is empty, it is because the user wants you to continue from where you left off in the previous messages."""
 
-    return "\n".join(
-        [system_prompt_preamble, system_prompt_image_capture, system_prompt_tool_usage]
-    )
+    return "\n".join([system_prompt_preamble, system_prompt_image_capture, system_prompt_tool_usage])
 
 
-class PromptBuilder:
-    """Builds and prepares prompts for Claude interactions."""
+def prepare_imported_files_content(imported_files: list[str]) -> str:
+    """Prepare content from imported files to include in initial conversation.
 
-    def __init__(self, shell: InteractiveShell | None) -> None:
-        """Initialize the prompt builder.
+    Args:
+        imported_files: List of file paths to import
 
-        Args:
-            shell: IPython shell instance
-        """
-        self.shell = shell
-
-    def prepare_imported_files_content(self, imported_files: list[str]) -> str:
-        """Prepare content from imported files to include in initial conversation.
-
-        Args:
-            imported_files: List of file paths to import
-
-        Returns:
-            Formatted string with file contents
-        """
-        if not imported_files:
-            return ""
-
-        files_content = []
-
-        for file_path_str in imported_files:
-            file_path = Path(file_path_str)
-            if file_path.exists():
-                try:
-                    with file_path.open() as f:
-                        content = f.read()
-                    files_content.append(f"{file_path.name}:\n```\n{content}\n```")
-                except Exception:
-                    # Skip files that can't be read
-                    pass
-
-        if files_content:
-            return (
-                "Files imported by the user for your reference. Use this content directly. Don't read them again:\n\n"
-                + "\n\n".join(files_content)
-            )
+    Returns:
+        Formatted string with file contents
+    """
+    if not imported_files:
         return ""
 
-    def build_enhanced_prompt(
-        self,
-        prompt: str,
-        variables_info: str,
-        previous_execution: str = "",
-        shell_output: str = "",
-        is_new_conversation: bool = False,
-        imported_files_content: str = "",
-        last_cells_content: str = "",
-        captured_images: list[dict[str, Any]] | None = None,
-    ) -> str | list[dict[str, Any]]:
-        """Build the enhanced prompt with all context.
+    files_content = []
 
-        Args:
-            prompt: User's prompt text
-            variables_info: Current variables information
-            previous_execution: Previous execution results
-            shell_output: Recent shell output
-            is_new_conversation: Whether this is a new conversation
-            imported_files_content: Content from imported files
-            last_cells_content: Content from last executed cells
-            captured_images: List of captured images
+    for file_path_str in imported_files:
+        file_path = Path(file_path_str)
+        if file_path.exists():
+            try:
+                with file_path.open() as f:
+                    content = f.read()
+                files_content.append(f"{file_path.name}:\n```\n{content}\n```")
+            except Exception:
+                pass
 
-        Returns:
-            Either a string prompt or structured content with images
-        """
-        if captured_images is None:
-            captured_images = []
-
-        # Build base enhanced prompt
-        enhanced_prompt_text = f"""
-Your client's request is <request>{prompt}</request>
-
-{variables_info}
-{previous_execution}
-"""
-
-        # Add shell output if present
-        if shell_output:
-            enhanced_prompt_text += shell_output
-
-        # Prepend context for new conversations
-        if is_new_conversation:
-            context_parts = []
-
-            # Add imported files content
-            if imported_files_content:
-                context_parts.append(imported_files_content)
-
-            # Add last executed cells if requested
-            if last_cells_content:
-                context_parts.append(last_cells_content)
-
-            if context_parts:
-                enhanced_prompt_text = (
-                    "\n\n".join(context_parts) + "\n\n" + enhanced_prompt_text
-                )
-
-        # Build structured content if we have images
-        if captured_images:
-            # Build structured content with images
-            content_blocks: list[dict[str, Any]] = []
-
-            # Add images first
-            for img in captured_images:
-                content_blocks.append(
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": img["format"],
-                            "data": img["data"],
-                        },
-                    }
-                )
-
-            # Add text content
-            content_blocks.append({"type": "text", "text": enhanced_prompt_text})
-
-            return content_blocks
-        else:
-            return enhanced_prompt_text
+    if files_content:
+        return (
+            "Files imported by the user for your reference. Use this content directly. Don't read them again:\n\n"
+            + "\n\n".join(files_content)
+        )
+    return ""

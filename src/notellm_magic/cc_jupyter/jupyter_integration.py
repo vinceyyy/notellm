@@ -49,9 +49,7 @@ def create_approval_cell(
         }
         parent.shell.user_ns["_claude_cell_queue"].append(cell_info)
 
-    queue_position = (
-        len(parent.shell.user_ns["_claude_cell_queue"]) if parent.shell else 0
-    )
+    queue_position = len(parent.shell.user_ns["_claude_cell_queue"]) if parent.shell else 0
 
     # Display formatted output
     print("\n" + "=" * 60, flush=True)
@@ -68,9 +66,7 @@ def create_approval_cell(
             from pygments.formatters import TerminalFormatter
             from pygments.lexers import PythonLexer
 
-            print(
-                highlight(marked_code, PythonLexer(), TerminalFormatter()), flush=True
-            )
+            print(highlight(marked_code, PythonLexer(), TerminalFormatter()), flush=True)
         else:
             print(marked_code, flush=True)
 
@@ -139,9 +135,7 @@ def process_cell_queue(parent: ClaudeCodeMagics) -> None:
 
     if next_cell_index is not None:
         # Only show "Next cell ready" if there are more cells after this one
-        remaining = sum(
-            1 for cell in cell_queue[next_cell_index:] if not cell.get("executed", False)
-        )
+        remaining = sum(1 for cell in cell_queue[next_cell_index:] if not cell.get("executed", False))
         if remaining > 0:
             next_cell_marker_id = cell_queue[next_cell_index]["marker_id"]
             print(

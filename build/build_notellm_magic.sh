@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 ARCHIVE_DIR="$REPO_DIR/archive/cc_jupyter"
-TARGET_DIR="$REPO_DIR/notellm_magic/cc_jupyter"
+TARGET_DIR="$REPO_DIR/src/notellm_magic/cc_jupyter"
 
 # Colors
 GREEN=$'\033[0;32m'
@@ -35,99 +35,27 @@ if [ -d "$TARGET_DIR" ]; then
 fi
 
 # Copy archive to target
-echo "Copying archive to notellm_magic/cc_jupyter/..."
+echo "Copying archive to src/notellm_magic/cc_jupyter/..."
 cp -r "$ARCHIVE_DIR" "$TARGET_DIR"
 
 #######################################
-# PATCH 1: Permission Error Fix
-#######################################
-patch_permission_error() {
-    local magics_file="$TARGET_DIR/magics.py"
-
-    if [ ! -f "$magics_file" ]; then
-        echo -e "${RED}[PATCH 1] SKIP - magics.py not found${NC}"
-        return 1
-    fi
-
-    # Check if already patched
-    if grep -q "except (PermissionError, OSError):" "$magics_file"; then
-        echo -e "${YELLOW}[PATCH 1] Already applied${NC}"
-        return 0
-    fi
-
-    echo "[PATCH 1] Applying Permission Error Fix..."
-
-    export MAGICS_FILE="$magics_file"
-    python3 << 'PYTHON_SCRIPT'
-import os
-
-magics_file = os.environ['MAGICS_FILE']
-
-with open(magics_file, 'r') as f:
-    lines = f.readlines()
-
-patched = False
-new_lines = []
-i = 0
-
-while i < len(lines):
-    line = lines[i]
-
-    # Find the target line that causes permission error
-    if 'if remote_dev_monorepo_root.exists():' in line and i + 1 < len(lines):
-        indent = len(line) - len(line.lstrip())
-        base_indent = ' ' * indent
-        inner_indent = ' ' * (indent + 4)
-
-        # Replace 2-line block with try-except wrapper
-        new_lines.append(f"{base_indent}try:\n")
-        new_lines.append(f"{inner_indent}if remote_dev_monorepo_root.exists():\n")
-        new_lines.append(f"{inner_indent}    options.cwd = str(remote_dev_monorepo_root)\n")
-        new_lines.append(f"{base_indent}except (PermissionError, OSError):\n")
-        new_lines.append(f"{inner_indent}pass\n")
-
-        i += 2  # Skip the next line (options.cwd = ...)
-        patched = True
-        continue
-
-    new_lines.append(line)
-    i += 1
-
-if patched:
-    with open(magics_file, 'w') as f:
-        f.writelines(new_lines)
-    exit(0)
-else:
-    exit(1)
-PYTHON_SCRIPT
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}  Applied${NC}"
-        return 0
-    else
-        echo -e "${RED}  FAILED - Could not find target code${NC}"
-        return 1
-    fi
-}
-
-#######################################
-# PATCH 2: Remove Decorative Headers
+# PATCH 1: Remove Decorative Headers
 #######################################
 patch_decorative_headers() {
     local jupyter_integration_file="$TARGET_DIR/jupyter_integration.py"
 
     if [ ! -f "$jupyter_integration_file" ]; then
-        echo -e "${RED}[PATCH 2] SKIP - jupyter_integration.py not found${NC}"
+        echo -e "${RED}[PATCH 1] SKIP - jupyter_integration.py not found${NC}"
         return 1
     fi
 
     # Check if already patched
     if grep -q "# No decorative header - use original code as-is" "$jupyter_integration_file"; then
-        echo -e "${YELLOW}[PATCH 2] Already applied${NC}"
+        echo -e "${YELLOW}[PATCH 1] Already applied${NC}"
         return 0
     fi
 
-    echo "[PATCH 2] Removing Decorative Headers..."
+    echo "[PATCH 1] Removing Decorative Headers..."
 
     export JUPYTER_INTEGRATION_FILE="$jupyter_integration_file"
     python3 << 'PYTHON_SCRIPT'
@@ -197,13 +125,6 @@ echo "Applying patches..."
 
 PATCHES_APPLIED=0
 PATCHES_FAILED=0
-
-patch_permission_error
-if [ $? -eq 0 ]; then
-    ((PATCHES_APPLIED++)) || true
-else
-    ((PATCHES_FAILED++)) || true
-fi
 
 patch_decorative_headers
 if [ $? -eq 0 ]; then

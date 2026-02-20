@@ -32,9 +32,7 @@ class HistoryManager:
         if self.shell is not None:
             self.last_output_line = len(self.shell.user_ns.get("In", [])) - 1
 
-    def get_history_range(
-        self, start: int | None = None, stop: int | None = None
-    ) -> list[tuple[int, int, Any]]:
+    def get_history_range(self, start: int | None = None, stop: int | None = None) -> list[tuple[int, int, Any]]:
         """Get history range from the shell's history manager.
 
         Args:
@@ -62,9 +60,7 @@ class HistoryManager:
         except Exception:
             return []
 
-    def format_cell(
-        self, line_num: int, input_code: str, output_result: Any = None
-    ) -> str:
+    def format_cell(self, line_num: int, input_code: str, output_result: Any = None) -> str:
         """Format a cell's input and output as XML tags.
 
         Args:
@@ -115,20 +111,14 @@ class HistoryManager:
                         output_result = None
 
                     # Skip claude magic commands
-                    if input_code and not input_code.strip().startswith(
-                        "get_ipython().run_cell_magic"
-                    ):
-                        formatted_cell = self.format_cell(
-                            line_num, input_code, output_result
-                        )
+                    if input_code and not input_code.strip().startswith("get_ipython().run_cell_magic"):
+                        formatted_cell = self.format_cell(line_num, input_code, output_result)
 
                         # If no output from history but it exists in Out dict, add it
                         if output_result is None and self.shell:
                             out_dict = self.shell.user_ns.get("Out", {})
                             if line_num in out_dict:
-                                formatted_cell = self.format_cell(
-                                    line_num, input_code, out_dict[line_num]
-                                )
+                                formatted_cell = self.format_cell(line_num, input_code, out_dict[line_num])
 
                         shell_interactions.append(formatted_cell)
             else:
@@ -139,9 +129,7 @@ class HistoryManager:
 
                     for i in range(self.last_output_line + 1, len(in_list)):
                         cmd = in_list[i] if i < len(in_list) else None
-                        if cmd and not cmd.strip().startswith(
-                            "get_ipython().run_cell_magic"
-                        ):
+                        if cmd and not cmd.strip().startswith("get_ipython().run_cell_magic"):
                             output = out_dict.get(i)
                             formatted_cell = self.format_cell(i, cmd, output)
                             shell_interactions.append(formatted_cell)
@@ -194,12 +182,8 @@ class HistoryManager:
                     output_result = None
 
                 # Skip magic commands
-                if input_code and not input_code.strip().startswith(
-                    "get_ipython().run_cell_magic"
-                ):
-                    formatted_cell = self.format_cell(
-                        line_num, input_code, output_result
-                    )
+                if input_code and not input_code.strip().startswith("get_ipython().run_cell_magic"):
+                    formatted_cell = self.format_cell(line_num, input_code, output_result)
                     cells_content.append(formatted_cell)
 
             if len(cells_content) > 1:  # More than just the header
