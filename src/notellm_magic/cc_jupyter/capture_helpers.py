@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Helper functions for capturing and processing rich outputs from IPython.
 """
@@ -43,7 +42,7 @@ def extract_images_from_captured(captured_output: Any) -> list[dict[str, Any]]:
 
 
 def format_images_summary(images: list[dict[str, Any]]) -> str:
-    """Create a text summary of captured images for including in prompts.
+    """Create a text summary of captured images for the user.
 
     Args:
         images: List of image dicts from extract_images_from_captured
@@ -54,30 +53,17 @@ def format_images_summary(images: list[dict[str, Any]]) -> str:
     if not images:
         return ""
 
-    lines = ["The following images were captured from the code execution:"]
+    lines = [f"📷 Captured {len(images)} image(s) from code execution:"]
 
     for i, img in enumerate(images, 1):
         format_type = img["format"]
 
-        # Get dimensions if available
         dims = ""
         if "dimensions" in img:
             dims_data = img["dimensions"]
-            if (
-                isinstance(dims_data, dict)
-                and "width" in dims_data
-                and "height" in dims_data
-            ):
+            if isinstance(dims_data, dict) and "width" in dims_data and "height" in dims_data:
                 dims = f" ({dims_data['width']}x{dims_data['height']})"
 
-        # Show a preview of the base64 data
-        data_preview = (
-            img["data"][:50] + "..." if len(img["data"]) > 50 else img["data"]
-        )
+        lines.append(f"  {i}. {format_type}{dims}")
 
-        lines.append(f"\nImage {i}:")
-        lines.append(f"  Format: {format_type}{dims}")
-        lines.append(f"  Base64 data preview: {data_preview}")
-
-    lines.append("\nNote: The full image data is available in the captured output.")
     return "\n".join(lines)

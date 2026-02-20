@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import trio
+import anyio
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     McpServerConfig,
@@ -44,7 +44,7 @@ from .jupyter_integration import (
     is_in_jupyter_notebook,
     process_cell_queue,
 )
-from .prompt_builder import PromptBuilder, get_system_prompt
+from .prompt_builder import get_system_prompt, prepare_imported_files_content
 from .variable_tracker import VariableTracker
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ async def execute_python_tool(args: dict[str, Any]) -> dict[str, Any]:
     """Handle create_python_cell tool calls - create cells and return immediately."""
     if _magic_instance is None:
         # Ensure async checkpoint before returning
-        await trio.lowlevel.checkpoint()
+        await anyio.lowlevel.checkpoint()
         return {
             "content": [{"type": "text", "text": "❌ Magic instance not initialized"}],
             "is_error": True,
@@ -76,19 +76,16 @@ async def execute_python_tool(args: dict[str, Any]) -> dict[str, Any]:
     code = args.get("code", "")
     if not code:
         # Ensure async checkpoint before returning
-        await trio.lowlevel.checkpoint()
+        await anyio.lowlevel.checkpoint()
         return {
             "content": [{"type": "text", "text": "❌ No code provided"}],
             "is_error": True,
         }
 
     # Check if max_cells limit has been reached
-    if (
-        _magic_instance._config_manager.create_python_cell_count
-        >= _magic_instance._config_manager.max_cells
-    ):
+    if _magic_instance._config_manager.create_python_cell_count >= _magic_instance._config_manager.max_cells:
         # Ensure async checkpoint before returning
-        await trio.lowlevel.checkpoint()
+        await anyio.lowlevel.checkpoint()
         return {
             "content": [
                 {
@@ -122,7 +119,7 @@ async def execute_python_tool(args: dict[str, Any]) -> dict[str, Any]:
         _magic_instance._config_manager.create_python_cell_count += 1
 
         # Ensure async checkpoint before returning
-        await trio.lowlevel.checkpoint()
+        await anyio.lowlevel.checkpoint()
         # Return immediately - don't wait for user
         return {
             "content": [
@@ -136,7 +133,7 @@ async def execute_python_tool(args: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
         # Ensure async checkpoint before returning
-        await trio.lowlevel.checkpoint()
+        await anyio.lowlevel.checkpoint()
         return {
             "content": [{"type": "text", "text": f"❌ Error creating cells: {e!s}"}],
             "is_error": True,
@@ -156,7 +153,6 @@ class ClaudeCodeMagics(Magics):
         # Initialize delegated components
         self._variable_tracker = VariableTracker(shell)
         self._history_manager = HistoryManager(shell)
-        self._prompt_builder = PromptBuilder(shell)
         self._config_manager = ConfigManager()
 
         # Request tracking for cell-based flow
@@ -173,6 +169,13 @@ class ClaudeCodeMagics(Magics):
         # Will be initialized on first use
         self._client_manager: ClaudeClientManager | None = None
 
+        # Create SDK MCP server once — the tool config is static
+        self._sdk_server = create_sdk_mcp_server(
+            name="jupyter_executor",
+            version="1.0.0",
+            tools=[execute_python_tool],
+        )
+
         # Register post-execution hook to process cell queue
         if shell is not None:
             shell.events.register("post_run_cell", self._post_run_cell_hook)
@@ -182,17 +185,10 @@ class ClaudeCodeMagics(Magics):
 
         HelpEnd.priority = EscapedCommand.priority + 1
 
-    def _create_approval_cell(
-        self, code: str, request_id: str, tool_use_id: str | None = None
-    ) -> None:
+    def _create_approval_cell(self, code: str, request_id: str, tool_use_id: str | None = None) -> None:
         """Create a cell for user approval of code execution."""
-        should_cleanup_prompts = (
-            self._config_manager.should_cleanup_prompts
-            or self._config_manager.editing_current_cell
-        )
-        create_approval_cell(
-            self, code, request_id, should_cleanup_prompts, tool_use_id
-        )
+        should_replace = self._config_manager.should_cleanup_prompts or self._config_manager.replace_current_cell
+        create_approval_cell(self, code, request_id, should_replace, tool_use_id)
 
     def _post_run_cell_hook(self, result: Any) -> None:
         """Hook that runs after each cell execution to process the queue."""
@@ -200,16 +196,12 @@ class ClaudeCodeMagics(Magics):
             return
 
         # Check if we have a cell queue
-        cell_queue: list[dict[str, Any]] = self.shell.user_ns.get(
-            "_claude_cell_queue", []
-        )
+        cell_queue: list[dict[str, Any]] = self.shell.user_ns.get("_claude_cell_queue", [])
         if not cell_queue:
             return
 
         # Get the last executed code
-        last_input = (
-            self.shell.user_ns.get("In", [""])[-1] if "In" in self.shell.user_ns else ""
-        )
+        last_input = self.shell.user_ns.get("In", [""])[-1] if "In" in self.shell.user_ns else ""
 
         # Find the next unexecuted cell in the queue
         next_expected_index: int | None = None
@@ -229,9 +221,7 @@ class ClaudeCodeMagics(Magics):
             # Mark this cell as executed
             if next_expected_index is not None:
                 cell_queue[next_expected_index]["executed"] = True
-                cell_queue[next_expected_index]["had_exception"] = (
-                    not result.success if result else False
-                )
+                cell_queue[next_expected_index]["had_exception"] = not result.success if result else False
                 if result and not result.success and result.error_in_exec:
                     # Store the exception information
                     cell_queue[next_expected_index]["error"] = {
@@ -348,26 +338,18 @@ Your client's request is <request>{prompt}</request>
 
             # Add imported files content
             if self._config_manager.imported_files:
-                imported_content = self._prompt_builder.prepare_imported_files_content(
-                    self._config_manager.imported_files
-                )
+                imported_content = prepare_imported_files_content(self._config_manager.imported_files)
                 if imported_content:
                     context_parts.append(imported_content)
 
             # Add last executed cells if requested
-            if (
-                self._config_manager.cells_to_load != 0
-            ):  # Load cells if not explicitly disabled (0)
-                last_cells_content = self._history_manager.get_last_executed_cells(
-                    self._config_manager.cells_to_load
-                )
+            if self._config_manager.cells_to_load != 0:  # Load cells if not explicitly disabled (0)
+                last_cells_content = self._history_manager.get_last_executed_cells(self._config_manager.cells_to_load)
                 if last_cells_content:
                     context_parts.append(last_cells_content)
 
             if context_parts:
-                enhanced_prompt_text = (
-                    "\n\n".join(context_parts) + "\n\n" + enhanced_prompt_text
-                )
+                enhanced_prompt_text = "\n\n".join(context_parts) + "\n\n" + enhanced_prompt_text
 
         # Build the prompt content - either as string or structured with images
         enhanced_prompt: str | list[dict[str, Any]]
@@ -397,22 +379,11 @@ Your client's request is <request>{prompt}</request>
         else:
             enhanced_prompt = enhanced_prompt_text
 
-        # Create SDK MCP server with the execute_python tool
-        sdk_server = create_sdk_mcp_server(
-            name="jupyter_executor",
-            version="1.0.0",
-            tools=[execute_python_tool],  # This is the SdkMcpTool instance
-        )
-
         # Build MCP servers dictionary - explicitly type as McpServerConfig to handle union type
-        mcp_servers: dict[str, McpServerConfig] = {
-            "jupyter": sdk_server
-        }  # Start with our SDK server
+        mcp_servers: dict[str, McpServerConfig] = {"jupyter": self._sdk_server}  # Start with our SDK server
 
         # Configure any additional MCP servers from config
-        additional_mcp_servers = self._config_manager.get_mcp_servers(
-            ""
-        )  # Pass empty string instead of None
+        additional_mcp_servers = self._config_manager.get_mcp_servers("")  # Pass empty string instead of None
 
         if additional_mcp_servers:
             # Merge with our SDK server
@@ -442,45 +413,30 @@ Your client's request is <request>{prompt}</request>
                 ),
             },
             setting_sources=["user", "project", "local"],
+            add_dirs=[Path(d) for d in self._config_manager.added_directories]
+            if self._config_manager.added_directories
+            else [],
         )
-
-        # If we have added directories, construct the permissions JSON
-        settings_json = self._config_manager.get_claude_code_options_settings()
-        if settings_json:
-            options.settings = settings_json
-
-        # Determine the appropriate working directory
-        # For remote dev, we will set Claude Code's cwd to the monorepo root so
-        # that Claude Code can access it. (Temporary solution until Claude Code
-        # SDK supports --add-dir in the monorepo.)
-        remote_dev_monorepo_root = Path("/root/code")
-        try:
-            if remote_dev_monorepo_root.exists():
-                options.cwd = str(remote_dev_monorepo_root)
-        except (PermissionError, OSError):
-            pass
 
         # If we have an existing session ID from the client manager, use it to resume the conversation
         if self._client_manager is not None and self._client_manager.session_id:
             options.resume = self._client_manager.session_id
 
         # Run the query with streaming
-        # Simple approach: always use a thread to avoid trio.run() nesting issues
+        # Simple approach: always use a thread to avoid anyio.run() nesting issues
         exception_queue: queue.Queue[Exception] = queue.Queue()
 
         def run_in_thread() -> None:
             try:
                 # This always works because the thread has its own context
-                trio.run(
-                    self._run_streaming_query,
-                    enhanced_prompt,
-                    options,
-                    verbose,
+                # anyio.run() takes a no-arg async callable, so wrap with a lambda
+                anyio.run(
+                    lambda: self._run_streaming_query(enhanced_prompt, options, verbose),
                 )
             except Exception as e:
                 exception_queue.put(e)
 
-        # Run in a separate thread to avoid any trio context issues
+        # Run in a separate thread to avoid event loop nesting issues
         thread = threading.Thread(target=run_in_thread)
         thread.start()
 
@@ -492,11 +448,11 @@ Your client's request is <request>{prompt}</request>
             if self._client_manager is not None:
                 print("Interrupting Claude Code")
 
-                # Handle interrupt in a separate thread to avoid nesting trio.run()
+                # Handle interrupt in a separate thread to avoid nesting anyio.run()
                 def handle_interrupt() -> None:
                     if self._client_manager is not None:
                         with contextlib.suppress(Exception):
-                            trio.run(self._client_manager.handle_interrupt)
+                            anyio.run(self._client_manager.handle_interrupt)  # no-args async callable
 
                 interrupt_thread = threading.Thread(target=handle_interrupt)
                 interrupt_thread.start()
@@ -528,11 +484,11 @@ Your client's request is <request>{prompt}</request>
                 # Now we can safely set the next input
                 self.shell.set_next_input(
                     pending_input,
-                    replace=self._config_manager.should_cleanup_prompts
-                    or self._config_manager.editing_current_cell,
+                    replace=self._config_manager.should_cleanup_prompts or self._config_manager.replace_current_cell,
                 )
 
         self._config_manager.is_new_conversation = False
+        self._config_manager.replace_current_cell = False
 
     async def _run_streaming_query(
         self,
@@ -545,12 +501,8 @@ Your client's request is <request>{prompt}</request>
         await run_streaming_query(self, prompt, options, verbose)
         self._config_manager.is_current_execution_verbose = False
 
-    def _claude_continue_impl(
-        self, request_id: str, additional_prompt: str = "", verbose: bool = False
-    ) -> str:
-        cell_queue: list[dict[str, Any]] = (
-            self.shell.user_ns.get("_claude_cell_queue", []) if self.shell else []
-        )
+    def _claude_continue_impl(self, request_id: str, additional_prompt: str = "", verbose: bool = False) -> str:
+        cell_queue: list[dict[str, Any]] = self.shell.user_ns.get("_claude_cell_queue", []) if self.shell else []
 
         if verbose:
             executed_count = sum(1 for cell in cell_queue if cell.get("executed", False))
@@ -611,10 +563,7 @@ Your client's request is <request>{prompt}</request>
 
             execution_results.append(result_entry)
 
-        continue_prompt = (
-            "Previous code execution results for requested code cells:\n"
-            + "\n\n".join(execution_results)
-        )
+        continue_prompt = "Previous code execution results for requested code cells:\n" + "\n\n".join(execution_results)
 
         additional_prompt = additional_prompt.strip()
         if not additional_prompt:
@@ -743,11 +692,7 @@ Your client's request is <request>{prompt}</request>
             return
 
         # Check if there's a pending request
-        request_id = (
-            self.shell.user_ns.get("_claude_request_id")
-            if self.shell is not None
-            else None
-        )
+        request_id = self.shell.user_ns.get("_claude_request_id") if self.shell is not None else None
 
         if request_id:
             # There's a pending code execution - continue with it
@@ -757,9 +702,7 @@ Your client's request is <request>{prompt}</request>
             if self.shell is not None and "_claude_cell_queue" in self.shell.user_ns:
                 cell_queue = self.shell.user_ns["_claude_cell_queue"]
                 if cell_queue:
-                    unexecuted = sum(
-                        1 for cell in cell_queue if not cell.get("executed", False)
-                    )
+                    unexecuted = sum(1 for cell in cell_queue if not cell.get("executed", False))
                     if unexecuted > 0:
                         print(
                             f"⚠️ Clearing {unexecuted} unexecuted cells from previous request",
@@ -767,16 +710,36 @@ Your client's request is <request>{prompt}</request>
                         )
                 del self.shell.user_ns["_claude_cell_queue"]
 
-            if not prompt:
-                raise ValueError("A prompt must be provided to start the conversation.")
             self._execute_prompt(prompt, verbose=args.verbose)
 
     @line_cell_magic
     def ccn(self, line: str, cell: str | None = None) -> None:
-        """
-        An alias for %cc_new
-        """
+        """An alias for %cc_new"""
         self.cc_new(line, cell)
+
+    @line_cell_magic
+    def ccc(self, line: str, cell: str | None = None) -> None:
+        """An alias for %cc_cur"""
+        self.cc_cur(line, cell)
+
+    @line_cell_magic
+    def cc_cur(self, line: str, cell: str | None = None) -> None:
+        """
+        Run Claude Code and replace the current cell with generated code.
+
+        Like %cc, but replaces the prompt cell instead of inserting a new cell below.
+        Useful when you want Claude to overwrite the current cell in-place.
+
+        Usage as line magic:
+            %cc_cur refactor this code
+            %cc_cur --verbose rewrite using list comprehension
+
+        Usage as cell magic:
+            %%cc_cur
+            Replace this cell with a function that computes the mean
+        """
+        self._config_manager.replace_current_cell = True
+        self.cc(line, cell)
 
     @line_cell_magic
     def cc_new(self, line: str, cell: str | None = None) -> None:
@@ -832,15 +795,11 @@ Your client's request is <request>{prompt}</request>
         self._config_manager.is_new_conversation = True
         self._execute_prompt(prompt, verbose=args.verbose)
 
-    def _parse_args_and_prompt(
-        self, line: str, magic_func: Any
-    ) -> tuple[Any, str]:
+    def _parse_args_and_prompt(self, line: str, magic_func: Any) -> tuple[Any, str]:
         """Parse arguments and prompt from magic command line.
 
         Returns tuple of (args, prompt).
         """
-        self._config_manager.editing_current_cell = False
-
         parts = line.split(None, 1) if line else []  # Split into at most 2 parts
 
         if not parts:
@@ -880,9 +839,5 @@ Your client's request is <request>{prompt}</request>
 
             return parse_argstring(magic_func, args_str), prompt
         else:
-            lines = line.splitlines()
-            if any("=" in code_line or "(" in code_line for code_line in lines[1:]):
-                self._config_manager.editing_current_cell = True
-
             # First part is not an argument, entire line is the prompt
             return parse_argstring(magic_func, ""), line

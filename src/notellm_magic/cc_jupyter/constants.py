@@ -16,6 +16,7 @@ Usage:
   %cc <instructions>       # Continue with additional instructions (one-line)
   %%cc <instructions>      # Continue with additional instructions (multi-line)
   %cc_new (or %ccn)        # Start fresh conversation
+  %cc_cur (or %ccc)        # Like %cc, but replaces the prompt cell in-place
   %cc --help               # Show available options and usage information
 
 Context management:

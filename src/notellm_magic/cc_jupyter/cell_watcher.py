@@ -39,9 +39,7 @@ class CellWatcher:
         Args:
             info: Cell execution info from IPython
         """
-        self.time_between_cell_executions.append(
-            monotonic() - self.last_cell_finish_time
-        )
+        self.time_between_cell_executions.append(monotonic() - self.last_cell_finish_time)
 
     def post_run_cell(self, result: Any) -> None:
         """Hook called after a cell runs.
@@ -65,7 +63,4 @@ class CellWatcher:
             return False
 
         previous_gap, current_gap = self.time_between_cell_executions
-        return (
-            previous_gap < QUEUED_EXECUTION_THRESHOLD_SECONDS
-            and current_gap < QUEUED_EXECUTION_THRESHOLD_SECONDS
-        )
+        return previous_gap < QUEUED_EXECUTION_THRESHOLD_SECONDS and current_gap < QUEUED_EXECUTION_THRESHOLD_SECONDS

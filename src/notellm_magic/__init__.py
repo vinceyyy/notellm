@@ -5,26 +5,17 @@ Fork of claude-code-jupyter-staging (MIT License, Anthropic)
 Provides %cc magic for Claude Code integration in Jupyter notebooks.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import json
+from pathlib import Path
 
 DEFAULT_PERMISSIONS = {
-    "permissions": {
-        "allow": [
-            "Bash",
-            "Glob",
-            "Grep",
-            "Read",
-            "Edit",
-            "Write",
-            "WebSearch",
-            "WebFetch"
-        ]
-    }
+    "permissions": {"allow": ["Bash", "Glob", "Grep", "Read", "Edit", "Write", "WebSearch", "WebFetch"]}
 }
 
 
-def _ensure_claude_settings():
+def _ensure_claude_settings() -> bool:
     """Create .claude/settings.local.json if not present in cwd."""
     cwd = Path.cwd()
     claude_dir = cwd / ".claude"
@@ -38,7 +29,7 @@ def _ensure_claude_settings():
     return False
 
 
-def load_ipython_extension(ipython):
+def load_ipython_extension(ipython: object) -> None:
     """Load the cc_jupyter extension."""
     # Create settings file first if needed
     created = _ensure_claude_settings()
@@ -58,13 +49,5 @@ def load_ipython_extension(ipython):
     print("")
 
     from .cc_jupyter import load_ipython_extension as load_cc
+
     load_cc(ipython)
-
-
-def unload_ipython_extension(ipython):
-    """Unload the cc_jupyter extension."""
-    try:
-        from .cc_jupyter import unload_ipython_extension as unload_cc
-        unload_cc(ipython)
-    except (ImportError, AttributeError):
-        pass

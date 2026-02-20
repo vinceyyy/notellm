@@ -19,7 +19,7 @@ To make changes:
 
 ## Usage
 
-After installation (`./setup.sh`):
+After installation (`pip install .`):
 
 ```python
 %load_ext notellm_magic

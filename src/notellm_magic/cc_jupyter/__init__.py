@@ -9,18 +9,13 @@ and SDK-based usage.
 from __future__ import annotations
 
 from .cell_watcher import CellWatcher
-from .constants import HELP_TEXT, PYGMENTS_AVAILABLE
+from .constants import HELP_TEXT
 from .magics import ClaudeCodeMagics
 
-__version__ = "0.1.0"
-
-# Global configuration
-DEFAULT_PORT = 0  # Use 0 to let OS assign an available port
+__version__ = "0.2.0"
 
 __all__ = [
     "ClaudeCodeMagics",
-    "DEFAULT_PORT",
-    "PYGMENTS_AVAILABLE",
     "load_ipython_extension",
 ]
 

@@ -1,0 +1,46 @@
+[project]
+name = "notellm-magic"
+version = "0.2.0"
+description = "Lightweight Jupyter magic extension for Claude Code"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = [
+    "anyio>=4.12.1",
+    "claude-agent-sdk>=0.1.39",
+    "ipython>=9.10.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.7.2,<0.8"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# cc_jupyter files are generated from archive — allow long lines and unused vars
+"src/notellm_magic/cc_jupyter/*" = ["E501", "F841"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+# cc_jupyter files are generated from archive — suppress strict checking
+reportAttributeAccessIssue = "warning"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.2",
+]

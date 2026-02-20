@@ -26,7 +26,9 @@ class ConfigManager:
         """Initialize configuration with defaults."""
         # Cleanup settings
         self.should_cleanup_prompts = False
-        self.editing_current_cell = False
+        # Per-query flag: replace current cell instead of inserting below.
+        # Set by %cc_cur and reset after each query completes.
+        self.replace_current_cell = False
 
         # Conversation settings
         self.is_new_conversation: bool = True
@@ -87,19 +89,18 @@ class ConfigManager:
             print(CLEANUP_PROMPTS_TEXT.format(maybe_not=maybe_not))
             return True
 
-        # Determine the appropriate message for settings that require a new conversation
+        # Settings take effect on the next query. If a conversation is already in progress,
+        # the user needs to start fresh with %cc_new for the setting to apply.
         pickup_message = (
-            "Will be used in next new conversation."
+            "Will apply to the next query."
             if self.is_new_conversation
-            else "Use %cc_new to pick up the setting."
+            else "Use %cc_new to start a new conversation with this setting."
         )
 
         if args.max_cells is not None:
             old_max_cells = self.max_cells
             self.max_cells = args.max_cells
-            print(
-                f"📝 Set max_cells from {old_max_cells} to {self.max_cells}. {pickup_message}"
-            )
+            print(f"📝 Set max_cells from {old_max_cells} to {self.max_cells}. {pickup_message}")
             return True
 
         if args.import_file is not None:
@@ -117,9 +118,7 @@ class ConfigManager:
                 else:
                     print(f"ℹ️ {file_path} is already in the import list.")
             except Exception:
-                print(
-                    f"❌ Import failed: {file_path.name} does not exist or is not a plaintext file."
-                )
+                print(f"❌ Import failed: {file_path.name} does not exist or is not a plaintext file.")
             return True
 
         if args.add_dir is not None:
@@ -137,9 +136,7 @@ class ConfigManager:
             dir_str = str(dir_path)
             if dir_str not in self.added_directories:
                 self.added_directories.append(dir_str)
-                print(
-                    f"✅ Added {dir_path} to accessible directories. {pickup_message}"
-                )
+                print(f"✅ Added {dir_path} to accessible directories. {pickup_message}")
             else:
                 print(f"ℹ️ {dir_path} is already in the accessible directories list.")
             return True
@@ -147,9 +144,7 @@ class ConfigManager:
         if args.mcp_config is not None:
             config_path = Path(args.mcp_config).expanduser().resolve()
 
-            # Store the config file path
-            config_str = str(config_path)
-            self.mcp_config_file = config_str
+            self.mcp_config_file = str(config_path)
             print(f"✅ Set MCP config file to {config_path}. {pickup_message}")
             return True
 
@@ -165,17 +160,11 @@ class ConfigManager:
             self.cells_to_load = args.cells_to_load
             self.cells_to_load_user_set = True  # Mark as explicitly set by user
             if args.cells_to_load == 0:
-                print(
-                    "✅ Disabled loading recent cells when starting new conversations"
-                )
+                print("✅ Disabled loading recent cells when starting new conversations")
             elif args.cells_to_load == -1:
-                print(
-                    "✅ Will load all available cells when starting new conversations"
-                )
+                print("✅ Will load all available cells when starting new conversations")
             else:
-                print(
-                    f"✅ Will load up to {args.cells_to_load} recent cell(s) when starting new conversations"
-                )
+                print(f"✅ Will load up to {args.cells_to_load} recent cell(s) when starting new conversations")
             return True
 
         # Handle queued execution check
@@ -185,19 +174,6 @@ class ConfigManager:
 
         # No options were handled
         return False
-
-    def get_claude_code_options_settings(self) -> str | None:
-        """Get the settings JSON for ClaudeAgentOptions if needed.
-
-        Returns:
-            JSON string with settings or None
-        """
-        if self.added_directories:
-            permissions_dict = {
-                "permissions": {"additionalDirectories": self.added_directories}
-            }
-            return json.dumps(permissions_dict)
-        return None
 
     def get_mcp_servers(self, mcp_server_script: str) -> dict[str, Any]:
         """Get the MCP servers configuration.
@@ -222,9 +198,7 @@ class ConfigManager:
             try:
                 with Path(self.mcp_config_file).open() as f:
                     config_data = json.load(f)
-                    if "mcpServers" in config_data and isinstance(
-                        config_data["mcpServers"], dict
-                    ):
+                    if "mcpServers" in config_data and isinstance(config_data["mcpServers"], dict):
                         mcp_servers.update(config_data["mcpServers"])
             except json.JSONDecodeError as e:
                 print(f"⚠️ Error parsing MCP config file {self.mcp_config_file}: {e}")
